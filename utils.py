@@ -1,43 +1,50 @@
-import streamlit as st
 import torch
 import pdfplumber
 from PIL import Image
-from transformers import pipeline
+from transformers import (
+    BlipProcessor, BlipForConditionalGeneration,
+    BartTokenizer, BartForConditionalGeneration,
+    pipeline
+)
 
-# Use cache_resource so the model stays in memory and doesn't reload
-@st.cache_resource
-def load_summarizer():
-    # Use a smaller/distilled model if you still face memory errors
-    # "sshleifer/distilbart-cnn-12-6" is a lighter version of BART
-    return pipeline("summarization", model="facebook/bart-large-cnn")
-
-@st.cache_resource
-def load_captioner():
-    return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
-
+# --- 1. Image Captioning Logic ---
 def get_image_caption(image_file):
-    captioner = load_captioner()
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+    
     image = Image.open(image_file).convert("RGB")
-    result = captioner(image)
-    return result[0]['generated_text']
+    inputs = processor(image, return_tensors="pt")
+    
+    with torch.no_grad():
+        out = model.generate(**inputs)
+    return processor.decode(out[0], skip_special_tokens=True)
 
+# --- 2. PDF Summarization Logic ---
 def summarize_pdf(pdf_file):
     text = ""
+    # Use pdfplumber to extract text
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            content = page.extract_text()
-            if content:
-                text += content + " "
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + " "
     
     if not text.strip():
-        return "No readable text found in PDF."
-    
-    return generate_summary(text)
+        return "Error: No text could be extracted from this PDF."
 
-def generate_summary(text):
-    summarizer = load_summarizer()
-    # Truncate text to ~3000 characters to stay within BART's token limit
-    # and prevent memory crashes
-    truncated_text = text[:3000] 
-    summary = summarizer(truncated_text, max_length=150, min_length=40, do_sample=False)
+    # Use the pipeline with the specified model
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    
+    # BART limit is 1024 tokens. Truncating text to prevent overflow.
+    summary = summarizer(text[:3000], max_length=150, min_length=40, do_sample=False)
     return summary[0]['summary_text']
+
+# --- 3. Text Summarization Logic (from BARTYT) ---
+def summarize_text(input_text):
+    model_name = "facebook/bart-large-cnn"
+    tokenizer = BartTokenizer.from_pretrained(model_name)
+    model = BartForConditionalGeneration.from_pretrained(model_name)
+    
+    inputs = tokenizer([input_text], max_length=1024, return_tensors="pt", truncation=True)
+    summary_ids = model.generate(inputs["input_ids"], num_beams=4, max_length=150, early_stopping=True)
+    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
