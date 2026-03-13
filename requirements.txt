@@ -3,3 +3,4 @@ torch
 transformers
 pdfplumber
 pillow
+tf-keras
