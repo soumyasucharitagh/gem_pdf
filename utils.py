@@ -21,15 +21,22 @@ def get_image_caption(image_file):
 
 # --- 2. PDF Summarization Logic ---
 def summarize_pdf(pdf_file):
-    # Extract text from PDF
     text = ""
+    # Use pdfplumber to extract text
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            text += page.extract_text()
-            
-    # Summarize using BART
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + " "
+    
+    if not text.strip():
+        return "Error: No text could be extracted from this PDF."
+
+    # Use the pipeline with the specified model
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    summary = summarizer(text[:1024], max_length=150, min_length=40, do_sample=False)
+    
+    # BART limit is 1024 tokens. Truncating text to prevent overflow.
+    summary = summarizer(text[:3000], max_length=150, min_length=40, do_sample=False)
     return summary[0]['summary_text']
 
 # --- 3. Text Summarization Logic (from BARTYT) ---
